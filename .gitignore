@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+*.dSYM
+*.app
+dist/
+*.zip
+.DS_Store
