@@ -141,7 +141,6 @@ public enum SystemMediaRemote {
                 }
                 
                 let rawTitle = (dict["kMRMediaRemoteNowPlayingInfoTitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                print("SystemMediaRemote: rawTitle is '\(rawTitle ?? "<nil>")'")
                 let rawArtist = (dict["kMRMediaRemoteNowPlayingInfoArtist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let rawAlbum = (dict["kMRMediaRemoteNowPlayingInfoAlbum"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let playbackRate = parseDouble(dict["kMRMediaRemoteNowPlayingInfoPlaybackRate"])
@@ -160,10 +159,11 @@ public enum SystemMediaRemote {
                     
                     // Live real-time elapsed time calculation from snapshot timestamp
                     var liveElapsed = elapsedTime
-                    if let ts = dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date, isPlaying {
+                    let timestamp: Date? = (dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date) ?? ((dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? NSDate) as Date?)
+                    if let ts = timestamp, isPlaying {
                         let delta = Date().timeIntervalSince(ts)
                         if delta > 0 && delta < 86400 {
-                            liveElapsed = elapsedTime + (delta * playbackRate)
+                            liveElapsed = elapsedTime + (delta * (playbackRate > 0 ? playbackRate : 1.0))
                             if duration > 0 {
                                 liveElapsed = min(liveElapsed, duration)
                             }

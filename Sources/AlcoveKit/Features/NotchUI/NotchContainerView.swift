@@ -147,6 +147,10 @@ public struct YasIslandCollapsedEarsView: View {
     @State private var mediaWidget = MediaControlsWidget.shared
     @State private var timerWidget = QuickTimerWidget.shared
     
+    private var hasMedia: Bool {
+        !mediaWidget.trackInfo.title.isEmpty && mediaWidget.trackInfo.title != "No Media Playing"
+    }
+    
     public var body: some View {
         HStack(spacing: 0) {
             // LEFT WING: Clean Artwork or App Glyph + Track Name
@@ -162,17 +166,17 @@ public struct YasIslandCollapsedEarsView: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(AlcoveTheme.accentOrange)
                 } else {
-                    Image(systemName: mediaWidget.trackInfo.isPlaying ? "waveform" : "music.note")
+                    Image(systemName: mediaWidget.trackInfo.isPlaying ? "waveform" : (hasMedia ? "play.circle.fill" : "music.note"))
                         .font(.system(size: 8.5, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.85))
                 }
                 
-                if mediaWidget.trackInfo.isPlaying && !mediaWidget.trackInfo.title.isEmpty {
+                if hasMedia {
                     Text(mediaWidget.trackInfo.title)
                         .font(.system(size: 9.5, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.92))
                         .lineLimit(1)
-                        .frame(maxWidth: 68)
+                        .frame(maxWidth: 80)
                 } else if timerWidget.isRunning {
                     Text("Timer")
                         .font(.system(size: 9.5, weight: .semibold, design: .rounded))
@@ -186,13 +190,19 @@ public struct YasIslandCollapsedEarsView: View {
             
             // RIGHT WING: Live Timestamp / Countdown + Live 3-bar Waveform
             HStack(spacing: 4) {
-                if mediaWidget.trackInfo.isPlaying {
+                if hasMedia {
                     if mediaWidget.trackInfo.elapsedTime > 0 {
                         Text(formatCollapsedTime(mediaWidget.trackInfo.elapsedTime))
                             .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Color.white.opacity(0.70))
                     }
-                    LiveWaveformView(isPlaying: true, barCount: 3, height: 9)
+                    if mediaWidget.trackInfo.isPlaying {
+                        LiveWaveformView(isPlaying: true, barCount: 3, height: 9)
+                    } else {
+                        Image(systemName: "pause.fill")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.45))
+                    }
                 } else if timerWidget.isRunning {
                     Text(timerWidget.formattedRemainingTime)
                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
@@ -231,6 +241,10 @@ public struct YasIslandDuoCollapsedView: View {
     @State private var timerWidget = QuickTimerWidget.shared
     @State private var statusWidget = SystemStatusWidget.shared
     
+    private var hasMedia: Bool {
+        !mediaWidget.trackInfo.title.isEmpty && mediaWidget.trackInfo.title != "No Media Playing"
+    }
+    
     public var body: some View {
         HStack(spacing: 0) {
             // LEFT PILL: Media Status & Thumbnail
@@ -242,16 +256,16 @@ public struct YasIslandDuoCollapsedView: View {
                         .frame(width: 13, height: 13)
                         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                 } else {
-                    Image(systemName: "music.note")
+                    Image(systemName: mediaWidget.trackInfo.isPlaying ? "waveform" : (hasMedia ? "play.circle.fill" : "music.note"))
                         .font(.system(size: 8.5, weight: .bold))
                         .foregroundStyle(Color.white.opacity(0.85))
                 }
                 
-                Text(mediaWidget.trackInfo.title.isEmpty ? "Now Playing" : mediaWidget.trackInfo.title)
+                Text(hasMedia ? mediaWidget.trackInfo.title : "Now Playing")
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.90))
                     .lineLimit(1)
-                    .frame(maxWidth: 55)
+                    .frame(maxWidth: 65)
                 
                 if mediaWidget.trackInfo.isPlaying {
                     LiveWaveformView(isPlaying: true, barCount: 3, height: 8)
