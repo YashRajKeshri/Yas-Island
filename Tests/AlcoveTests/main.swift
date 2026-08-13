@@ -63,17 +63,22 @@ func simulateUserInteractions() async throws {
     print("   👉 Visual: Execution ID badge turns green\n")
     
     // ACTION 5: User interacts with Media Controls
-    print("📍 [ACTION 5] User toggles media playback and skips track...")
-    let mediaWidget = MediaControlsWidget.shared
-    print("   👉 Current Audio Source: \(mediaWidget.trackInfo.appName)")
-    print("   👉 User clicks Play/Pause...")
-    mediaWidget.togglePlayback()
-    try await Task.sleep(nanoseconds: 400_000_000)
-    print("   👉 Playback State: \(mediaWidget.trackInfo.isPlaying ? "▶️ PLAYING" : "⏸️ PAUSED")")
-    print("   👉 User clicks Next Track (⏭)...")
-    mediaWidget.skipNext()
-    try await Task.sleep(nanoseconds: 400_000_000)
-    print("   👉 Dispatched skip command to active system/browser audio engine\n")
+    print("📍 [ACTION 5] User interacts with Media Controls...")
+    let liveTrack: MediaTrackInfo? = await withCheckedContinuation { continuation in
+        SystemMediaRemote.fetchNowPlayingInfo { track in
+            continuation.resume(returning: track)
+        }
+    }
+    if let liveTrack = liveTrack {
+        MediaControlsWidget.shared.trackInfo = liveTrack
+        print("   👉 Detected Media Title: '\(liveTrack.title)'")
+        print("   👉 Detected Artist: '\(liveTrack.artist)'")
+        print("   👉 Elapsed: \(liveTrack.elapsedTime)s / Duration: \(liveTrack.duration)s")
+        print("   👉 Playing State: \(liveTrack.isPlaying ? "▶️ PLAYING" : "⏸️ PAUSED")")
+        print("   👉 Artwork Data Present: \(liveTrack.artworkData != nil)")
+    } else {
+        print("   👉 No live track detected (System reported idle)")
+    }
     
     // ACTION 6: User clicks the Dock/Collapse button to hide the tray
     print("📍 [ACTION 6] User clicks 'Dock' button (or presses Esc)...")

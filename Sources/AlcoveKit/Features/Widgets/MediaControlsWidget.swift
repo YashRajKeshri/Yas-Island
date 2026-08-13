@@ -36,35 +36,37 @@ public struct MediaTrackInfo: Sendable, Equatable {
 
 public enum SystemMediaRemote {
     private typealias MRMediaRemoteSendCommandFunction = @convention(c) (Int32, AnyObject?) -> Bool
-    private typealias MRMediaRemoteGetNowPlayingInfoFunction = @convention(c) (DispatchQueue, @escaping (CFDictionary) -> Void) -> Void
+    private typealias MRMediaRemoteGetNowPlayingInfoFunction = @convention(c) (DispatchQueue, @convention(block) @escaping (AnyObject?) -> Void) -> Void
     private typealias MRMediaRemoteRegisterFunction = @convention(c) (DispatchQueue) -> Void
     
-    private static let bundle: CFBundle? = {
-        CFBundleCreate(kCFAllocatorDefault, NSURL(fileURLWithPath: "/System/Library/PrivateFrameworks/MediaRemote.framework"))
+    nonisolated(unsafe) private static let bundleHandle: UnsafeMutableRawPointer? = {
+        let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW)
+        if handle == nil {
+            print("❌ MediaRemote dlopen failed: \(String(cString: dlerror()))")
+        }
+        return handle
     }()
     
-    private static let sendCommandPtr: MRMediaRemoteSendCommandFunction? = {
-        guard let b = bundle,
-              let ptr = CFBundleGetFunctionPointerForName(b, "MRMediaRemoteSendCommand" as CFString) else {
-            return nil
+    nonisolated(unsafe) private static let sendCommandPtr: MRMediaRemoteSendCommandFunction? = {
+        if let h = bundleHandle, let sym = dlsym(h, "MRMediaRemoteSendCommand") {
+            return unsafeBitCast(sym, to: MRMediaRemoteSendCommandFunction.self)
         }
-        return unsafeBitCast(ptr, to: MRMediaRemoteSendCommandFunction.self)
+        return nil
     }()
     
-    private static let getInfoPtr: MRMediaRemoteGetNowPlayingInfoFunction? = {
-        guard let b = bundle,
-              let ptr = CFBundleGetFunctionPointerForName(b, "MRMediaRemoteGetNowPlayingInfo" as CFString) else {
-            return nil
+    nonisolated(unsafe) private static let getInfoPtr: MRMediaRemoteGetNowPlayingInfoFunction? = {
+        if let h = bundleHandle, let sym = dlsym(h, "MRMediaRemoteGetNowPlayingInfo") {
+            return unsafeBitCast(sym, to: MRMediaRemoteGetNowPlayingInfoFunction.self)
         }
-        return unsafeBitCast(ptr, to: MRMediaRemoteGetNowPlayingInfoFunction.self)
+        print("❌ MRMediaRemoteGetNowPlayingInfo dlsym failed!")
+        return nil
     }()
     
-    private static let registerPtr: MRMediaRemoteRegisterFunction? = {
-        guard let b = bundle,
-              let ptr = CFBundleGetFunctionPointerForName(b, "MRMediaRemoteRegisterForNowPlayingNotifications" as CFString) else {
-            return nil
+    nonisolated(unsafe) private static let registerPtr: MRMediaRemoteRegisterFunction? = {
+        if let h = bundleHandle, let sym = dlsym(h, "MRMediaRemoteRegisterForNowPlayingNotifications") {
+            return unsafeBitCast(sym, to: MRMediaRemoteRegisterFunction.self)
         }
-        return unsafeBitCast(ptr, to: MRMediaRemoteRegisterFunction.self)
+        return nil
     }()
     
     public static func registerForNotifications() {
@@ -119,18 +121,39 @@ public enum SystemMediaRemote {
         return NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == bundleId })
     }
     
+    private static func parseDouble(_ value: Any?) -> Double {
+        if let num = value as? NSNumber { return num.doubleValue }
+        if let str = value as? String, let d = Double(str) { return d }
+        if let d = value as? Double { return d }
+        return 0.0
+    }
+    
     public static func fetchNowPlayingInfo(completion: @escaping @Sendable (MediaTrackInfo?) -> Void) {
-        // Step 1: Query Apple MediaRemote
+        print("fetchNowPlayingInfo called! getInfoPtr is nil?:", getInfoPtr == nil)
+        // Step 1: Query Apple MediaRemote on high-priority global queue
         if let getInfo = getInfoPtr {
-            getInfo(DispatchQueue.main) { infoDict in
-                let dict = infoDict as NSDictionary
+            getInfo(DispatchQueue.global(qos: .userInteractive)) { obj in
+                print("DEBUG: in getInfo callback, obj is:", obj as Any)
+                guard let dict = obj as? [String: Any] else {
+                    print("DEBUG: failed to cast obj to [String: Any]! type(of: obj) is:", type(of: obj as Any))
+                    fallbackFetch(completion: completion)
+                    return
+                }
+                
                 let rawTitle = (dict["kMRMediaRemoteNowPlayingInfoTitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                print("SystemMediaRemote: rawTitle is '\(rawTitle ?? "<nil>")'")
                 let rawArtist = (dict["kMRMediaRemoteNowPlayingInfoArtist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let rawAlbum = (dict["kMRMediaRemoteNowPlayingInfoAlbum"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let playbackRate = dict["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0.0
-                let duration = dict["kMRMediaRemoteNowPlayingInfoDuration"] as? Double ?? 0.0
-                let elapsedTime = dict["kMRMediaRemoteNowPlayingInfoElapsedTime"] as? Double ?? 0.0
-                let artworkData = dict["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data
+                let playbackRate = parseDouble(dict["kMRMediaRemoteNowPlayingInfoPlaybackRate"])
+                let duration = parseDouble(dict["kMRMediaRemoteNowPlayingInfoDuration"])
+                let elapsedTime = parseDouble(dict["kMRMediaRemoteNowPlayingInfoElapsedTime"])
+                
+                var artworkData: Data? = nil
+                if let d = dict["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data {
+                    artworkData = d
+                } else if let nsD = dict["kMRMediaRemoteNowPlayingInfoArtworkData"] as? NSData {
+                    artworkData = nsD as Data
+                }
                 
                 if let rawTitle = rawTitle, !rawTitle.isEmpty {
                     let isPlaying = playbackRate > 0.0
@@ -185,7 +208,9 @@ public enum SystemMediaRemote {
                         isAutoMixEnabled: true,
                         airPlayDevice: "MacBook Pro Speakers"
                     )
-                    completion(track)
+                    DispatchQueue.main.async {
+                        completion(track)
+                    }
                     return
                 }
                 
