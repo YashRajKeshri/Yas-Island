@@ -4,11 +4,13 @@
 [![Swift](https://img.shields.io/badge/Swift-6.0-F05138?style=for-the-badge&logo=swift&logoColor=white)](https://swift.org)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-4.0-007AFF?style=for-the-badge&logo=swift&logoColor=white)](https://developer.apple.com/xcode/swiftui/)
 [![CoreAudio](https://img.shields.io/badge/CoreAudio-Hardware%20Routing-green?style=for-the-badge)](https://developer.apple.com/documentation/coreaudio)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+[![Download App](https://img.shields.io/badge/⬇️%20Download-Yas%20Island%20v1.0.0-blue?style=for-the-badge&logo=apple)](https://github.com/YashRajKeshri/Yas-Island/releases/download/v1.0.0/Yas.Island-v1.0.0.zip)
 
 > **Transforming the MacBook camera notch from dead black plastic into an organic, liquid Dynamic Island HUD.** Built natively with Swift 6, SwiftUI, AppKit (`NSPanel`), and Apple CoreAudio.
 
 ---
+
+### 📥 [👉 Click Here to Download Yas Island (v1.0.0 .ZIP)](https://github.com/YashRajKeshri/Yas-Island/releases/download/v1.0.0/Yas.Island-v1.0.0.zip)
 
 ```
  ╭─────────────────────────────────────────────────────────────────────────────╮
@@ -66,29 +68,20 @@ graph TD
     G --> L[DropShelfTargetView]
 ```
 
-### Module Breakdown:
-| Directory | Responsibility |
-| :--- | :--- |
-| **`Core/NotchEngine/`** | `NSPanel` lifecycle, screen metrics resolution, collection behaviors, and geometry providers. |
-| **`Core/Hardware/`** | Low-level CoreAudio hardware output device discovery, switching, and volume control. |
-| **`Features/NotchUI/`** | SwiftUI morphing container, squircle masks, fluid spring curves, and audio waveform animations. |
-| **`Features/Widgets/`** | Modular widgets: Media controls, Pomodoro timer, telemetry rings, drop vault, and AI workflows. |
-| **`App/`** | `NSApplicationDelegate`, menu bar status item, and accessory policy lifecycle. |
-
 ---
 
 ## 🚀 Installation & Distribution
 
 ### 📦 Pre-Built App
-1. Download **`Yas Island-v1.0.0.zip`** from [Releases](https://github.com/YashRajKeshri/YasIsland/releases).
+1. Download **[`Yas.Island-v1.0.0.zip`](https://github.com/YashRajKeshri/Yas-Island/releases/download/v1.0.0/Yas.Island-v1.0.0.zip)**.
 2. Unzip and drag **`Yas Island.app`** into your `/Applications` folder.
 3. Open the app and hover your cursor over the camera notch!
 
 ### 💻 Building from Source
 ```bash
 # Clone repository
-git clone https://github.com/YashRajKeshri/YasIsland.git
-cd YasIsland
+git clone https://github.com/YashRajKeshri/Yas-Island.git
+cd Yas-Island
 
 # Build optimized release binary and package .app bundle
 ./scripts/build_app.sh
