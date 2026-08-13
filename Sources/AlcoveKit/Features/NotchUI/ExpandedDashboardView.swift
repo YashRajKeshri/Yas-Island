@@ -401,8 +401,14 @@ public struct ExpandedDashboardView: View {
     
     private func formatTime(_ seconds: Double) -> String {
         guard seconds > 0 else { return "0:00" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
+        let totalSecs = Int(seconds)
+        let hours = totalSecs / 3600
+        let mins = (totalSecs % 3600) / 60
+        let secs = totalSecs % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, mins, secs)
+        } else {
+            return String(format: "%d:%02d", mins, secs)
+        }
     }
 }

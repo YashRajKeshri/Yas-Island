@@ -124,26 +124,61 @@ public enum SystemMediaRemote {
         if let getInfo = getInfoPtr {
             getInfo(DispatchQueue.main) { infoDict in
                 let dict = infoDict as NSDictionary
-                let title = (dict["kMRMediaRemoteNowPlayingInfoTitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let artist = (dict["kMRMediaRemoteNowPlayingInfoArtist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let album = (dict["kMRMediaRemoteNowPlayingInfoAlbum"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawTitle = (dict["kMRMediaRemoteNowPlayingInfoTitle"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawArtist = (dict["kMRMediaRemoteNowPlayingInfoArtist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawAlbum = (dict["kMRMediaRemoteNowPlayingInfoAlbum"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let playbackRate = dict["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0.0
                 let duration = dict["kMRMediaRemoteNowPlayingInfoDuration"] as? Double ?? 0.0
                 let elapsedTime = dict["kMRMediaRemoteNowPlayingInfoElapsedTime"] as? Double ?? 0.0
                 let artworkData = dict["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data
                 
-                if let title = title, !title.isEmpty {
+                if let rawTitle = rawTitle, !rawTitle.isEmpty {
                     let isPlaying = playbackRate > 0.0
-                    let progress = duration > 0 ? min(max(elapsedTime / duration, 0.0), 1.0) : (isPlaying ? 0.5 : 0.0)
+                    
+                    // Live real-time elapsed time calculation from snapshot timestamp
+                    var liveElapsed = elapsedTime
+                    if let ts = dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date, isPlaying {
+                        let delta = Date().timeIntervalSince(ts)
+                        if delta > 0 && delta < 86400 {
+                            liveElapsed = elapsedTime + (delta * playbackRate)
+                            if duration > 0 {
+                                liveElapsed = min(liveElapsed, duration)
+                            }
+                        }
+                    }
+                    
+                    // Smart title/artist parsing (e.g. "Song | Artist" or "Artist - Song")
+                    var displayTitle = rawTitle
+                    var displayArtist = rawArtist ?? ""
+                    
+                    if displayArtist.isEmpty && displayTitle.contains(" | ") {
+                        let comps = displayTitle.components(separatedBy: " | ")
+                        displayTitle = comps[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                        displayArtist = comps.dropFirst().joined(separator: " | ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else if displayArtist.isEmpty && displayTitle.contains(" - ") {
+                        let comps = displayTitle.components(separatedBy: " - ")
+                        displayArtist = comps[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                        displayTitle = comps.dropFirst().joined(separator: " - ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else if displayArtist.isEmpty && displayTitle.contains(" – ") {
+                        let comps = displayTitle.components(separatedBy: " – ")
+                        displayArtist = comps[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                        displayTitle = comps.dropFirst().joined(separator: " – ").trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    
+                    if displayArtist.isEmpty {
+                        displayArtist = (rawAlbum?.isEmpty ?? true) ? "Now Playing" : rawAlbum!
+                    }
+                    
+                    let progress = duration > 0 ? min(max(liveElapsed / duration, 0.0), 1.0) : (isPlaying ? 0.5 : 0.0)
                     let track = MediaTrackInfo(
-                        title: title,
-                        artist: (artist?.isEmpty ?? true) ? ((album?.isEmpty ?? true) ? "Now Playing" : album!) : artist!,
-                        album: album ?? "",
+                        title: displayTitle,
+                        artist: displayArtist,
+                        album: rawAlbum ?? "",
                         isPlaying: isPlaying,
                         appName: "System",
                         progress: progress,
                         duration: duration,
-                        elapsedTime: elapsedTime,
+                        elapsedTime: liveElapsed,
                         artworkData: artworkData,
                         isPodcast: duration > 1200,
                         podcastSpeed: 1.0,
@@ -189,14 +224,18 @@ public enum SystemMediaRemote {
         guard isAppRunning("com.spotify.client") else { return nil }
         let script = """
         tell application "Spotify"
-            set pState to player state as string
-            set tName to name of current track
-            set aName to artist of current track
-            set alName to album of current track
-            set tDur to (duration of current track) / 1000
-            set tPos to player position
-            set aUrl to artwork url of current track
-            return pState & "|||" & tName & "|||" & aName & "|||" & alName & "|||" & tPos & "|||" & tDur & "|||" & aUrl
+            try
+                set pState to player state as string
+                set tName to name of current track
+                set aName to artist of current track
+                set alName to album of current track
+                set tDur to (duration of current track) / 1000
+                set tPos to player position
+                set aUrl to artwork url of current track
+                return pState & "|||" & tName & "|||" & aName & "|||" & alName & "|||" & tPos & "|||" & tDur & "|||" & aUrl
+            on error
+                return ""
+            end try
         end tell
         """
         guard let output = executeScript(script), !output.isEmpty else { return nil }
@@ -238,13 +277,19 @@ public enum SystemMediaRemote {
         guard isAppRunning("com.apple.Music") else { return nil }
         let script = """
         tell application "Music"
-            set pState to player state as string
-            set tName to name of current track
-            set aName to artist of current track
-            set alName to album of current track
-            set tDur to duration of current track
-            set tPos to player position
-            return pState & "|||" & tName & "|||" & aName & "|||" & alName & "|||" & tPos & "|||" & tDur
+            try
+                set pState to player state as string
+                if pState is not "stopped" then
+                    set tName to name of current track
+                    set aName to artist of current track
+                    set alName to album of current track
+                    set tDur to duration of current track
+                    set tPos to player position
+                    return pState & "|||" & tName & "|||" & aName & "|||" & alName & "|||" & tPos & "|||" & tDur
+                end if
+            on error
+                return ""
+            end try
         end tell
         """
         guard let output = executeScript(script), !output.isEmpty else { return nil }
@@ -291,29 +336,37 @@ public enum SystemMediaRemote {
             if browser.name == "Safari" {
                 script = """
                 tell application "Safari"
-                    repeat with aWin in every window
-                        repeat with aTab in every tab of aWin
-                            set tURL to URL of aTab
-                            set tTitle to name of aTab
-                            if tURL contains "youtube.com/watch" or tURL contains "music.youtube.com" or tURL contains "soundcloud.com" or tURL contains "spotify.com" then
-                                return tTitle & "|||" & tURL
-                            end if
+                    try
+                        repeat with aWin in every window
+                            repeat with aTab in every tab of aWin
+                                set tURL to (get URL of aTab)
+                                set tTitle to (get name of aTab)
+                                if tURL contains "youtube.com/watch" or tURL contains "music.youtube.com" or tURL contains "soundcloud.com" or tURL contains "spotify.com" then
+                                    return tTitle & "|||" & tURL
+                                end if
+                            end repeat
                         end repeat
-                    end repeat
+                    on error
+                        return ""
+                    end try
                 end tell
                 """
             } else {
                 script = """
                 tell application "\(browser.name)"
-                    repeat with aWin in every window
-                        repeat with aTab in every tab of aWin
-                            set tURL to URL of aTab
-                            set tTitle to title of aTab
-                            if tURL contains "youtube.com/watch" or tURL contains "music.youtube.com" or tURL contains "soundcloud.com" or tURL contains "spotify.com" then
-                                return tTitle & "|||" & tURL
-                            end if
+                    try
+                        repeat with aWin in windows
+                            repeat with aTab in tabs of aWin
+                                set tURL to (get url of aTab)
+                                set tTitle to (get title of aTab)
+                                if tURL contains "youtube.com/watch" or tURL contains "music.youtube.com" or tURL contains "soundcloud.com" or tURL contains "spotify.com" then
+                                    return tTitle & "|||" & tURL
+                                end if
+                            end repeat
                         end repeat
-                    end repeat
+                    on error
+                        return ""
+                    end try
                 end tell
                 """
             }
@@ -405,6 +458,28 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     
     private init() {
         SystemMediaRemote.registerForNotifications()
+        
+        // Listen for immediate MediaRemote notification changes
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("kMRMediaRemoteNowPlayingInfoDidChangeNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refresh()
+            }
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("kMRMediaRemoteNowPlayingApplicationDidChangeNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refresh()
+            }
+        }
+        
         startLiveSync()
     }
     
@@ -413,7 +488,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         syncTask?.cancel()
         syncTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                try? await Task.sleep(nanoseconds: 500_000_000) // 500ms smooth ticker
                 self?.refresh()
             }
         }
@@ -440,7 +515,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         SystemMediaRemote.togglePlayPause()
         trackInfo.isPlaying.toggle()
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: 150_000_000)
             self?.refresh()
         }
     }
@@ -448,7 +523,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     public func skipNext() {
         SystemMediaRemote.nextTrack()
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: 150_000_000)
             self?.refresh()
         }
     }
@@ -456,7 +531,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     public func skipPrevious() {
         SystemMediaRemote.previousTrack()
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: 150_000_000)
             self?.refresh()
         }
     }
@@ -571,216 +646,6 @@ public struct MediaControlsView: View {
     }
 }
 
-// Hero View with Spotify Podcast Speed, AutoMix & AirPlay Routing
-public struct MediaControlsHeroView: View {
-    @State private var model = MediaControlsWidget.shared
-    @State private var showAirPlaySheet: Bool = false
-    
-    public var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 14) {
-                // Large Clickable Album Art
-                Button {
-                    model.openSpotifyAlbum()
-                } label: {
-                    ArtworkThumbnail(data: model.trackInfo.artworkData, isPlaying: model.trackInfo.isPlaying, size: 66)
-                }
-                .buttonStyle(.plain)
-                .help("Tap to open Spotify playlist / album")
-                
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.trackInfo.title)
-                        .font(.system(size: 13.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(AlcoveTheme.textPrimary)
-                        .lineLimit(1)
-                    
-                    Button {
-                        model.openSpotifyArtist()
-                    } label: {
-                        Text(model.trackInfo.artist)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(AlcoveTheme.textSecondary)
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    HStack(spacing: 8) {
-                        // AirPlay Selector Menu
-                        Menu {
-                            ForEach(model.availableAirPlayDevices, id: \.self) { dev in
-                                Button {
-                                    model.selectAirPlayDevice(dev)
-                                } label: {
-                                    HStack {
-                                        Text(dev)
-                                        if model.trackInfo.airPlayDevice == dev {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "airplayaudio")
-                                    .font(.system(size: 9.5))
-                                Text(model.trackInfo.airPlayDevice)
-                                    .font(.system(size: 9.5, weight: .medium))
-                            }
-                            .foregroundStyle(AlcoveTheme.accentTeal)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(AlcoveTheme.accentTeal.opacity(0.12)))
-                        }
-                        .menuStyle(.borderlessButton)
-                        
-                        // AutoMix Toggle Pill
-                        Button {
-                            model.toggleAutoMix()
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: "waveform.path.badge.plus")
-                                    .font(.system(size: 9))
-                                Text("AutoMix")
-                                    .font(.system(size: 9, weight: .semibold))
-                            }
-                            .foregroundStyle(model.trackInfo.isAutoMixEnabled ? AlcoveTheme.accentGreen : AlcoveTheme.textTertiary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(model.trackInfo.isAutoMixEnabled ? AlcoveTheme.accentGreen.opacity(0.14) : Color.white.opacity(0.06))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .help("AutoMix intelligent DJ crossfades")
-                    }
-                    .padding(.top, 2)
-                }
-                
-                Spacer()
-                
-                // Playback Buttons
-                HStack(spacing: 8) {
-                    Button { model.skipPrevious() } label: {
-                        Image(systemName: "backward.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(AlcoveTheme.textSecondary)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button { model.togglePlayback() } label: {
-                        Image(systemName: model.trackInfo.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(
-                                Circle().fill(
-                                    LinearGradient(
-                                        colors: [AlcoveTheme.accentPurple, AlcoveTheme.accentPink],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .shadow(color: AlcoveTheme.accentPurple.opacity(0.4), radius: 6, y: 3)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button { model.skipNext() } label: {
-                        Image(systemName: "forward.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(AlcoveTheme.textSecondary)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            
-            // Podcast Speed Bar / Live Waveform
-            HStack {
-                HStack(spacing: 4) {
-                    Text("Speed:")
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(AlcoveTheme.textTertiary)
-                    
-                    ForEach([1.0, 1.25, 1.5, 2.0], id: \.self) { spd in
-                        Button {
-                            model.setPodcastSpeed(spd)
-                        } label: {
-                            Text(String(format: "%.2fx", spd).replacingOccurrences(of: ".00", with: ""))
-                                .font(.system(size: 9.5, weight: model.trackInfo.podcastSpeed == spd ? .bold : .regular))
-                                .foregroundStyle(model.trackInfo.podcastSpeed == spd ? AlcoveTheme.textPrimary : AlcoveTheme.textTertiary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(
-                                    Capsule().fill(model.trackInfo.podcastSpeed == spd ? Color.white.opacity(0.16) : Color.clear)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                Spacer()
-                
-                if model.trackInfo.isPlaying {
-                    LiveWaveformView(isPlaying: true, barCount: 7, height: 12)
-                }
-            }
-            
-            // Timeline Scrubber
-            VStack(spacing: 4) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.white.opacity(0.10))
-                            .frame(height: 4)
-                        
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [AlcoveTheme.accentPurple, AlcoveTheme.accentPink],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: max(geo.size.width * model.trackInfo.progress, 4), height: 4)
-                    }
-                }
-                .frame(height: 4)
-                
-                HStack {
-                    Text(formatTime(model.trackInfo.elapsedTime))
-                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(AlcoveTheme.textTertiary)
-                    Spacer()
-                    Text(formatTime(model.trackInfo.duration))
-                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(AlcoveTheme.textTertiary)
-                }
-            }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: AlcoveMetrics.cardCornerRadius, style: .continuous)
-                .fill(AlcoveTheme.cardBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: AlcoveMetrics.cardCornerRadius, style: .continuous)
-                        .strokeBorder(AlcoveTheme.cardBorder, lineWidth: 0.75)
-                )
-        )
-    }
-    
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds > 0 else { return "0:00" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
-    }
-}
-
 public struct ArtworkThumbnail: View {
     let data: Data?
     let isPlaying: Bool
@@ -793,30 +658,28 @@ public struct ArtworkThumbnail: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.4), radius: 5, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.4), radius: 4, y: 2)
             } else {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: isPlaying ? [
-                                AlcoveTheme.accentPurple,
-                                AlcoveTheme.accentPink,
-                                AlcoveTheme.accentTeal
+                                Color(red: 0.25, green: 0.25, blue: 0.28),
+                                Color(red: 0.12, green: 0.12, blue: 0.14)
                             ] : [
-                                Color(nsColor: .darkGray),
-                                Color(nsColor: .black)
+                                Color(red: 0.18, green: 0.18, blue: 0.20),
+                                Color(red: 0.08, green: 0.08, blue: 0.10)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: size, height: size)
-                    .shadow(color: isPlaying ? AlcoveTheme.accentPurple.opacity(0.4) : Color.clear, radius: 5, y: 2)
                 
                 Image(systemName: isPlaying ? "waveform" : "music.note")
-                    .font(.system(size: size * 0.4, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.85))
             }
         }
     }
