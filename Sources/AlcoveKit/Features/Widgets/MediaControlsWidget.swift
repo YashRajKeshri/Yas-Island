@@ -37,6 +37,7 @@ public struct MediaTrackInfo: Sendable, Equatable {
 public enum SystemMediaRemote {
     private typealias MRMediaRemoteSendCommandFunction = @convention(c) (Int32, AnyObject?) -> Bool
     private typealias MRMediaRemoteGetNowPlayingInfoFunction = @convention(c) (DispatchQueue, @convention(block) @escaping (AnyObject?) -> Void) -> Void
+    private typealias MRMediaRemoteSetElapsedTimeFunction = @convention(c) (Double) -> Bool
     private typealias MRMediaRemoteRegisterFunction = @convention(c) (DispatchQueue) -> Void
     
     nonisolated(unsafe) private static let bundleHandle: UnsafeMutableRawPointer? = {
@@ -50,6 +51,13 @@ public enum SystemMediaRemote {
     nonisolated(unsafe) private static let sendCommandPtr: MRMediaRemoteSendCommandFunction? = {
         if let h = bundleHandle, let sym = dlsym(h, "MRMediaRemoteSendCommand") {
             return unsafeBitCast(sym, to: MRMediaRemoteSendCommandFunction.self)
+        }
+        return nil
+    }()
+    
+    nonisolated(unsafe) private static let setElapsedPtr: MRMediaRemoteSetElapsedTimeFunction? = {
+        if let h = bundleHandle, let sym = dlsym(h, "MRMediaRemoteSetElapsedTime") {
+            return unsafeBitCast(sym, to: MRMediaRemoteSetElapsedTimeFunction.self)
         }
         return nil
     }()
@@ -78,6 +86,28 @@ public enum SystemMediaRemote {
             return send(commandId, nil)
         }
         return false
+    }
+    
+    public static func seek(to seconds: Double) {
+        let clamped = max(seconds, 0.0)
+        
+        // 1. Direct private MediaRemote API
+        if let setElapsed = setElapsedPtr {
+            _ = setElapsed(clamped)
+        }
+        
+        // 2. MediaRemote command 71 (kMRSetPlaybackPosition)
+        if let send = sendCommandPtr {
+            let opts: NSDictionary = ["kMRMediaRemoteOptionPlaybackPosition": NSNumber(value: clamped)]
+            _ = send(71, opts)
+        }
+        
+        // 3. AppleScript fallbacks for Spotify and Apple Music
+        if isAppRunning("com.spotify.client") {
+            runAppleScript("tell application \"Spotify\" to set player position to \(clamped)")
+        } else if isAppRunning("com.apple.Music") {
+            runAppleScript("tell application \"Music\" to set player position to \(clamped)")
+        }
     }
     
     public static func togglePlayPause() {
@@ -129,13 +159,10 @@ public enum SystemMediaRemote {
     }
     
     public static func fetchNowPlayingInfo(completion: @escaping @Sendable (MediaTrackInfo?) -> Void) {
-        print("fetchNowPlayingInfo called! getInfoPtr is nil?:", getInfoPtr == nil)
         // Step 1: Query Apple MediaRemote on high-priority global queue
         if let getInfo = getInfoPtr {
             getInfo(DispatchQueue.global(qos: .userInteractive)) { obj in
-                print("DEBUG: in getInfo callback, obj is:", obj as Any)
                 guard let dict = obj as? [String: Any] else {
-                    print("DEBUG: failed to cast obj to [String: Any]! type(of: obj) is:", type(of: obj as Any))
                     fallbackFetch(completion: completion)
                     return
                 }
@@ -557,6 +584,31 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         SystemMediaRemote.previousTrack()
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
+            self?.refresh()
+        }
+    }
+    
+    public func seek(toFraction fraction: Double) {
+        let clamped = min(max(fraction, 0.0), 1.0)
+        let targetTime = trackInfo.duration > 0 ? (trackInfo.duration * clamped) : (clamped * 100.0)
+        trackInfo.elapsedTime = targetTime
+        trackInfo.progress = clamped
+        SystemMediaRemote.seek(to: targetTime)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            self?.refresh()
+        }
+    }
+    
+    public func seek(toSeconds seconds: Double) {
+        let clamped = trackInfo.duration > 0 ? min(max(seconds, 0.0), trackInfo.duration) : max(seconds, 0.0)
+        trackInfo.elapsedTime = clamped
+        if trackInfo.duration > 0 {
+            trackInfo.progress = min(max(clamped / trackInfo.duration, 0.0), 1.0)
+        }
+        SystemMediaRemote.seek(to: clamped)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
             self?.refresh()
         }
     }

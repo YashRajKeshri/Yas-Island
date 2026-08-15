@@ -68,16 +68,8 @@ public struct ExpandedDashboardView: View {
                             }
                         }
                         
-                        // Mini Scrubber
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.white.opacity(0.15)).frame(height: 2.5)
-                                Capsule()
-                                    .fill(Color.white)
-                                    .frame(width: max(geo.size.width * mediaModel.trackInfo.progress, 3), height: 2.5)
-                            }
-                        }
-                        .frame(height: 2.5)
+                        // Mini Interactive Scrubber
+                        InteractiveScrubberBar(mediaModel: mediaModel, height: 2.5, isMini: true)
                         
                         // Controls Row
                         HStack(spacing: 12) {
@@ -298,25 +290,14 @@ public struct ExpandedDashboardView: View {
                     }
                     .padding(.horizontal, 4)
                     
-                    // MIDDLE ROW: Elapsed Time + Progress Scrubber + Remaining/Total Time
+                    // MIDDLE ROW: Elapsed Time + Interactive Scrubber + Remaining/Total Time
                     HStack(spacing: 7) {
                         Text(formatTime(mediaModel.trackInfo.elapsedTime))
                             .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                             .foregroundStyle(Color.white.opacity(0.45))
                         
-                        // Timeline Scrubber
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(Color.white.opacity(0.18))
-                                    .frame(height: 3)
-                                
-                                Capsule()
-                                    .fill(Color.white)
-                                    .frame(width: max(geo.size.width * mediaModel.trackInfo.progress, 3), height: 3)
-                            }
-                        }
-                        .frame(height: 3)
+                        // Interactive Progress Scrubber Bar
+                        InteractiveScrubberBar(mediaModel: mediaModel, height: 3.0, isMini: false)
                         
                         Text(formattedRemainingOrDuration)
                             .font(.system(size: 8.5, weight: .medium, design: .monospaced))
@@ -409,6 +390,88 @@ public struct ExpandedDashboardView: View {
             return String(format: "%d:%02d:%02d", hours, mins, secs)
         } else {
             return String(format: "%d:%02d", mins, secs)
+        }
+    }
+}
+
+// Interactive Playhead & Progress Scrubber Bar with Click & Drag Support
+public struct InteractiveScrubberBar: View {
+    @Bindable var mediaModel: MediaControlsWidget
+    var height: CGFloat = 3.0
+    var isMini: Bool = false
+    
+    @State private var isHovering: Bool = false
+    @State private var isDragging: Bool = false
+    @State private var dragProgress: Double? = nil
+    
+    private var currentProgress: Double {
+        if let drag = dragProgress {
+            return drag
+        }
+        return min(max(mediaModel.trackInfo.progress, 0.0), 1.0)
+    }
+    
+    public var body: some View {
+        GeometryReader { geo in
+            let totalWidth = max(geo.size.width, 1.0)
+            let activeWidth = min(max(totalWidth * currentProgress, 3.0), totalWidth)
+            let isEngaged = isHovering || isDragging
+            let barHeight = isEngaged ? (height + 2.5) : height
+            
+            ZStack(alignment: .leading) {
+                // Generous Hit Area
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                // Track Background
+                Capsule()
+                    .fill(Color.white.opacity(isEngaged ? 0.28 : 0.18))
+                    .frame(height: barHeight)
+                
+                // Active Filled Progress Track
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white, Color.white.opacity(0.95)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: activeWidth, height: barHeight)
+                
+                // Playhead Scrubber Knob
+                if isEngaged && !isMini {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 9.0, height: 9.0)
+                        .shadow(color: Color.black.opacity(0.4), radius: 2, y: 1)
+                        .offset(x: min(max(activeWidth - 4.5, 0.0), totalWidth - 9.0))
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        isDragging = true
+                        let fraction = min(max(value.location.x / totalWidth, 0.0), 1.0)
+                        dragProgress = fraction
+                        if mediaModel.trackInfo.duration > 0 {
+                            mediaModel.trackInfo.elapsedTime = mediaModel.trackInfo.duration * fraction
+                        }
+                    }
+                    .onEnded { value in
+                        let fraction = min(max(value.location.x / totalWidth, 0.0), 1.0)
+                        dragProgress = nil
+                        isDragging = false
+                        mediaModel.seek(toFraction: fraction)
+                    }
+            )
+        }
+        .frame(height: isMini ? 10.0 : 14.0)
+        .onHover { h in
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                isHovering = h
+            }
         }
     }
 }
