@@ -191,8 +191,8 @@ public struct YasIslandCollapsedEarsView: View {
             // RIGHT WING: Live Timestamp / Countdown + Live 3-bar Waveform
             HStack(spacing: 4) {
                 if hasMedia {
-                    if mediaWidget.trackInfo.elapsedTime > 0 {
-                        Text(formatCollapsedTime(mediaWidget.trackInfo.elapsedTime))
+                    if mediaWidget.currentLiveElapsedTime > 0 {
+                        Text(formatCollapsedTime(mediaWidget.currentLiveElapsedTime))
                             .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Color.white.opacity(0.70))
                     }

@@ -292,7 +292,7 @@ public struct ExpandedDashboardView: View {
                     
                     // MIDDLE ROW: Elapsed Time + Interactive Scrubber + Remaining/Total Time
                     HStack(spacing: 7) {
-                        Text(formatTime(mediaModel.trackInfo.elapsedTime))
+                        Text(formatTime(mediaModel.currentLiveElapsedTime))
                             .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                             .foregroundStyle(Color.white.opacity(0.45))
                         
@@ -374,7 +374,8 @@ public struct ExpandedDashboardView: View {
     
     private var formattedRemainingOrDuration: String {
         if mediaModel.trackInfo.duration > 0 {
-            let remaining = max(mediaModel.trackInfo.duration - mediaModel.trackInfo.elapsedTime, 0.0)
+            let currentElapsed = mediaModel.currentLiveElapsedTime
+            let remaining = max(mediaModel.trackInfo.duration - currentElapsed, 0.0)
             return "-\(formatTime(remaining))"
         }
         return "0:00"
@@ -408,7 +409,7 @@ public struct InteractiveScrubberBar: View {
         if let drag = dragProgress {
             return drag
         }
-        return min(max(mediaModel.trackInfo.progress, 0.0), 1.0)
+        return mediaModel.currentLiveProgress
     }
     
     public var body: some View {

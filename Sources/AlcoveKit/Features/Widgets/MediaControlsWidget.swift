@@ -16,6 +16,42 @@ public struct MediaTrackInfo: Sendable, Equatable {
     public var podcastSpeed: Double
     public var isAutoMixEnabled: Bool
     public var airPlayDevice: String
+    public var snapshotTimestamp: Date?
+    public var playbackRate: Double
+    
+    public init(
+        title: String,
+        artist: String,
+        album: String,
+        isPlaying: Bool,
+        appName: String,
+        progress: Double,
+        duration: Double,
+        elapsedTime: Double,
+        artworkData: Data? = nil,
+        isPodcast: Bool = false,
+        podcastSpeed: Double = 1.0,
+        isAutoMixEnabled: Bool = true,
+        airPlayDevice: String = "MacBook Pro Speakers",
+        snapshotTimestamp: Date? = nil,
+        playbackRate: Double = 0.0
+    ) {
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.isPlaying = isPlaying
+        self.appName = appName
+        self.progress = progress
+        self.duration = duration
+        self.elapsedTime = elapsedTime
+        self.artworkData = artworkData
+        self.isPodcast = isPodcast
+        self.podcastSpeed = podcastSpeed
+        self.isAutoMixEnabled = isAutoMixEnabled
+        self.airPlayDevice = airPlayDevice
+        self.snapshotTimestamp = snapshotTimestamp
+        self.playbackRate = playbackRate
+    }
     
     public static let placeholder = MediaTrackInfo(
         title: "No Media Playing",
@@ -30,7 +66,9 @@ public struct MediaTrackInfo: Sendable, Equatable {
         isPodcast: false,
         podcastSpeed: 1.0,
         isAutoMixEnabled: true,
-        airPlayDevice: "MacBook Pro Speakers"
+        airPlayDevice: "MacBook Pro Speakers",
+        snapshotTimestamp: nil,
+        playbackRate: 0.0
     )
 }
 
@@ -158,6 +196,81 @@ public enum SystemMediaRemote {
         return 0.0
     }
     
+    public static func cleanTrackInfo(rawTitle: String, rawArtist: String?, rawAlbum: String?) -> (title: String, artist: String) {
+        var title = rawTitle
+        var artist = rawArtist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        // Remove YouTube noise: (Official Music Video), [Remastered 2015], (Official Audio), (Lyrics), etc.
+        let patterns = [
+            "\\s*\\[[^\\]]*Remaster[^\\]]*\\]",
+            "\\s*\\([^\\)]*Remaster[^\\]]*\\)",
+            "\\s*\\([^\\)]*Official[^\\)]*\\)",
+            "\\s*\\[[^\\]]*Official[^\\]]*\\]",
+            "\\s*\\([^\\)]*Music Video[^\\)]*\\)",
+            "\\s*\\([^\\)]*Video[^\\)]*\\)",
+            "\\s*\\([^\\)]*Audio[^\\)]*\\)",
+            "\\s*\\([^\\)]*Lyric[^\\)]*\\)",
+            "\\s*\\([^\\)]*Promo[^\\)]*\\)",
+            "\\s*\\(4K\\)",
+            "\\s*\\(HD\\)",
+            "\\s*\\[4K\\]",
+            "\\s*\\[HD\\]"
+        ]
+        for p in patterns {
+            title = title.replacingOccurrences(of: p, with: "", options: [.regularExpression, .caseInsensitive])
+        }
+        
+        // Remove duplicate prefix: "Artist - Artist - Song" -> "Artist - Song"
+        if let range = title.range(of: "^(.+?)\\s*-\\s*\\1\\s*-\\s*", options: .regularExpression) {
+            title = String(title[range.upperBound...])
+        }
+        
+        // Clean VEVO from artist channel name: "TheBeatlesVEVO" -> "The Beatles"
+        if artist.hasSuffix("VEVO") {
+            artist = String(artist.dropLast(4))
+        }
+        
+        // Parse "Artist - Title" or "Title | Channel"
+        if title.contains(" - ") {
+            let parts = title.components(separatedBy: " - ")
+            if parts.count >= 2 {
+                let possibleArtist = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let possibleTitle = parts.dropFirst().joined(separator: " - ").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !possibleTitle.isEmpty {
+                    artist = possibleArtist
+                    title = possibleTitle
+                }
+            }
+        } else if title.contains(" – ") {
+            let parts = title.components(separatedBy: " – ")
+            if parts.count >= 2 {
+                let possibleArtist = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let possibleTitle = parts.dropFirst().joined(separator: " – ").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !possibleTitle.isEmpty {
+                    artist = possibleArtist
+                    title = possibleTitle
+                }
+            }
+        } else if title.contains(" | ") {
+            let parts = title.components(separatedBy: " | ")
+            if parts.count >= 2 {
+                title = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                if artist.isEmpty {
+                    artist = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        artist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if artist.isEmpty {
+            artist = (rawAlbum?.isEmpty ?? true) ? "Now Playing" : rawAlbum!
+        }
+        
+        return (title, artist)
+    }
+    
     public static func fetchNowPlayingInfo(completion: @escaping @Sendable (MediaTrackInfo?) -> Void) {
         // Step 1: Query Apple MediaRemote on high-priority global queue
         if let getInfo = getInfoPtr {
@@ -183,13 +296,13 @@ public enum SystemMediaRemote {
                 
                 if let rawTitle = rawTitle, !rawTitle.isEmpty {
                     let isPlaying = playbackRate > 0.0
+                    let timestamp: Date? = (dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date) ?? ((dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? NSDate) as Date?)
                     
                     // Live real-time elapsed time calculation from snapshot timestamp
                     var liveElapsed = elapsedTime
-                    let timestamp: Date? = (dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date) ?? ((dict["kMRMediaRemoteNowPlayingInfoTimestamp"] as? NSDate) as Date?)
                     if let ts = timestamp, isPlaying {
                         let delta = Date().timeIntervalSince(ts)
-                        if delta > 0 && delta < 86400 {
+                        if delta >= 0 && delta < 86400 {
                             liveElapsed = elapsedTime + (delta * (playbackRate > 0 ? playbackRate : 1.0))
                             if duration > 0 {
                                 liveElapsed = min(liveElapsed, duration)
@@ -197,32 +310,12 @@ public enum SystemMediaRemote {
                         }
                     }
                     
-                    // Smart title/artist parsing (e.g. "Song | Artist" or "Artist - Song")
-                    var displayTitle = rawTitle
-                    var displayArtist = rawArtist ?? ""
-                    
-                    if displayArtist.isEmpty && displayTitle.contains(" | ") {
-                        let comps = displayTitle.components(separatedBy: " | ")
-                        displayTitle = comps[0].trimmingCharacters(in: .whitespacesAndNewlines)
-                        displayArtist = comps.dropFirst().joined(separator: " | ").trimmingCharacters(in: .whitespacesAndNewlines)
-                    } else if displayArtist.isEmpty && displayTitle.contains(" - ") {
-                        let comps = displayTitle.components(separatedBy: " - ")
-                        displayArtist = comps[0].trimmingCharacters(in: .whitespacesAndNewlines)
-                        displayTitle = comps.dropFirst().joined(separator: " - ").trimmingCharacters(in: .whitespacesAndNewlines)
-                    } else if displayArtist.isEmpty && displayTitle.contains(" – ") {
-                        let comps = displayTitle.components(separatedBy: " – ")
-                        displayArtist = comps[0].trimmingCharacters(in: .whitespacesAndNewlines)
-                        displayTitle = comps.dropFirst().joined(separator: " – ").trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
-                    
-                    if displayArtist.isEmpty {
-                        displayArtist = (rawAlbum?.isEmpty ?? true) ? "Now Playing" : rawAlbum!
-                    }
-                    
+                    let cleaned = cleanTrackInfo(rawTitle: rawTitle, rawArtist: rawArtist, rawAlbum: rawAlbum)
                     let progress = duration > 0 ? min(max(liveElapsed / duration, 0.0), 1.0) : (isPlaying ? 0.5 : 0.0)
+                    
                     let track = MediaTrackInfo(
-                        title: displayTitle,
-                        artist: displayArtist,
+                        title: cleaned.title,
+                        artist: cleaned.artist,
                         album: rawAlbum ?? "",
                         isPlaying: isPlaying,
                         appName: "System",
@@ -233,7 +326,9 @@ public enum SystemMediaRemote {
                         isPodcast: duration > 1200,
                         podcastSpeed: 1.0,
                         isAutoMixEnabled: true,
-                        airPlayDevice: "MacBook Pro Speakers"
+                        airPlayDevice: "MacBook Pro Speakers",
+                        snapshotTimestamp: timestamp ?? Date(),
+                        playbackRate: playbackRate
                     )
                     DispatchQueue.main.async {
                         completion(track)
@@ -507,6 +602,25 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     ]
     
     private var syncTask: Task<Void, Never>?
+    private var emptyPollCount: Int = 0
+    
+    public var currentLiveElapsedTime: Double {
+        if trackInfo.isPlaying && trackInfo.playbackRate > 0, let ts = trackInfo.snapshotTimestamp {
+            let delta = Date().timeIntervalSince(ts)
+            if delta >= 0 && delta < 86400 {
+                let live = trackInfo.elapsedTime + (delta * trackInfo.playbackRate)
+                return trackInfo.duration > 0 ? min(live, trackInfo.duration) : live
+            }
+        }
+        return trackInfo.elapsedTime
+    }
+    
+    public var currentLiveProgress: Double {
+        if trackInfo.duration > 0 {
+            return min(max(currentLiveElapsedTime / trackInfo.duration, 0.0), 1.0)
+        }
+        return trackInfo.progress
+    }
     
     private init() {
         SystemMediaRemote.registerForNotifications()
@@ -539,9 +653,25 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         refresh()
         syncTask?.cancel()
         syncTask = Task { @MainActor [weak self] in
+            var pollCounter = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 500ms smooth ticker
-                self?.refresh()
+                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms smooth ticker
+                guard let self = self else { return }
+                
+                // Advance local progress and time dynamically
+                if self.trackInfo.isPlaying && self.trackInfo.playbackRate > 0 {
+                    let liveTime = self.currentLiveElapsedTime
+                    if self.trackInfo.duration > 0 {
+                        self.trackInfo.progress = min(max(liveTime / self.trackInfo.duration, 0.0), 1.0)
+                    }
+                }
+                
+                // Poll system MediaRemote every 600ms
+                pollCounter += 1
+                if pollCounter >= 3 {
+                    pollCounter = 0
+                    self.refresh()
+                }
             }
         }
     }
@@ -551,13 +681,18 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 if let live = liveTrack {
+                    self.emptyPollCount = 0
                     var updated = live
                     updated.podcastSpeed = self.trackInfo.podcastSpeed
                     updated.isAutoMixEnabled = self.trackInfo.isAutoMixEnabled
                     updated.airPlayDevice = self.trackInfo.airPlayDevice
                     self.trackInfo = updated
                 } else {
-                    self.trackInfo = .placeholder
+                    self.emptyPollCount += 1
+                    // Only revert to placeholder after 5 consecutive empty polls (~3 seconds)
+                    if self.emptyPollCount >= 5 {
+                        self.trackInfo = .placeholder
+                    }
                 }
             }
         }
