@@ -321,7 +321,7 @@ public enum SystemMediaRemote {
                         appName: "System",
                         progress: progress,
                         duration: duration,
-                        elapsedTime: liveElapsed,
+                        elapsedTime: elapsedTime, // Store base timestamp elapsed position (delta computed live)
                         artworkData: artworkData,
                         isPodcast: duration > 1200,
                         podcastSpeed: 1.0,

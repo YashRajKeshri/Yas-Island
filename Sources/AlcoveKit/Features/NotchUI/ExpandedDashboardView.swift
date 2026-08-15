@@ -398,7 +398,7 @@ public struct ExpandedDashboardView: View {
 // Interactive Playhead & Progress Scrubber Bar with Click & Drag Support
 public struct InteractiveScrubberBar: View {
     @Bindable var mediaModel: MediaControlsWidget
-    var height: CGFloat = 3.0
+    var height: CGFloat = 3.5
     var isMini: Bool = false
     
     @State private var isHovering: Bool = false
@@ -415,12 +415,13 @@ public struct InteractiveScrubberBar: View {
     public var body: some View {
         GeometryReader { geo in
             let totalWidth = max(geo.size.width, 1.0)
-            let activeWidth = min(max(totalWidth * currentProgress, 0.0), totalWidth)
+            let progressClamped = min(max(currentProgress, 0.0), 1.0)
+            let activeWidth = totalWidth * progressClamped
             let isEngaged = isHovering || isDragging
-            let barHeight = isEngaged ? (height + 2.5) : height
+            let barHeight = isEngaged ? 5.0 : height
             
             ZStack(alignment: .leading) {
-                // Generous Hit Area
+                // Invisible Generous Hit Box for easy clicking & dragging
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 
@@ -430,7 +431,7 @@ public struct InteractiveScrubberBar: View {
                     .frame(height: barHeight)
                 
                 // Active Filled Progress Track
-                if activeWidth > 1.0 {
+                if activeWidth > 0.5 {
                     Capsule()
                         .fill(
                             LinearGradient(
@@ -442,13 +443,13 @@ public struct InteractiveScrubberBar: View {
                         .frame(width: activeWidth, height: barHeight)
                 }
                 
-                // Playhead Scrubber Knob
-                if isEngaged && !isMini {
+                // Playhead Scrubber Knob (Visible and responsive)
+                if !isMini {
                     Circle()
                         .fill(Color.white)
-                        .frame(width: 9.0, height: 9.0)
+                        .frame(width: isEngaged ? 10.0 : 6.0, height: isEngaged ? 10.0 : 6.0)
                         .shadow(color: Color.black.opacity(0.4), radius: 2, y: 1)
-                        .offset(x: min(max(activeWidth - 4.5, 0.0), totalWidth - 9.0))
+                        .offset(x: min(max(activeWidth - (isEngaged ? 5.0 : 3.0), 0.0), totalWidth - (isEngaged ? 10.0 : 6.0)))
                 }
             }
             .contentShape(Rectangle())
@@ -460,6 +461,7 @@ public struct InteractiveScrubberBar: View {
                         dragProgress = fraction
                         if mediaModel.trackInfo.duration > 0 {
                             mediaModel.trackInfo.elapsedTime = mediaModel.trackInfo.duration * fraction
+                            mediaModel.trackInfo.snapshotTimestamp = Date()
                         }
                     }
                     .onEnded { value in
@@ -470,7 +472,7 @@ public struct InteractiveScrubberBar: View {
                     }
             )
         }
-        .frame(height: isMini ? 10.0 : 14.0)
+        .frame(height: isMini ? 10.0 : 16.0)
         .onHover { h in
             withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
                 isHovering = h
