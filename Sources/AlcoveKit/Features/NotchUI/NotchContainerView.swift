@@ -189,32 +189,35 @@ public struct YasIslandCollapsedEarsView: View {
             Spacer()
             
             // RIGHT WING: Live Timestamp / Countdown + Live 3-bar Waveform
-            HStack(spacing: 4) {
-                if hasMedia {
-                    if mediaWidget.currentLiveElapsedTime > 0 {
-                        Text(formatCollapsedTime(mediaWidget.currentLiveElapsedTime))
-                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.70))
-                    }
-                    if mediaWidget.trackInfo.isPlaying {
-                        LiveWaveformView(isPlaying: true, barCount: 3, height: 9)
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                let liveElapsed = mediaWidget.currentLiveElapsedTime
+                HStack(spacing: 4) {
+                    if hasMedia {
+                        if liveElapsed > 0 {
+                            Text(formatCollapsedTime(liveElapsed))
+                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(Color.white.opacity(0.70))
+                        }
+                        if mediaWidget.trackInfo.isPlaying {
+                            LiveWaveformView(isPlaying: true, barCount: 3, height: 9)
+                        } else {
+                            Image(systemName: "pause.fill")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.45))
+                        }
+                    } else if timerWidget.isRunning {
+                        Text(timerWidget.formattedRemainingTime)
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(AlcoveTheme.accentOrange)
                     } else {
-                        Image(systemName: "pause.fill")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.45))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.35))
                     }
-                } else if timerWidget.isRunning {
-                    Text(timerWidget.formattedRemainingTime)
-                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(AlcoveTheme.accentOrange)
-                } else {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 7.5, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.35))
                 }
+                .frame(height: 12)
+                .padding(.trailing, 7)
             }
-            .frame(height: 12)
-            .padding(.trailing, 7)
         }
     }
     

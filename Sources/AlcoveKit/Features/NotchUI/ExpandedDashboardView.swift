@@ -291,19 +291,32 @@ public struct ExpandedDashboardView: View {
                     .padding(.horizontal, 4)
                     
                     // MIDDLE ROW: Elapsed Time + Interactive Scrubber + Remaining/Total Time
-                    HStack(spacing: 7) {
-                        Text(formatTime(mediaModel.trackInfo.elapsedTime))
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.55))
+                    TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                        let liveElapsed = mediaModel.currentLiveElapsedTime
+                        let totalDuration = mediaModel.trackInfo.duration
+                        let liveProgress = totalDuration > 0 ? min(max(liveElapsed / totalDuration, 0.0), 1.0) : 0.0
                         
-                        // Interactive Progress Scrubber Bar
-                        InteractiveScrubberBar(mediaModel: mediaModel, height: 3.5, isMini: false)
-                        
-                        Text(formattedRemainingOrDuration)
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.55))
+                        HStack(spacing: 7) {
+                            Text(formatTime(liveElapsed))
+                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(Color.white.opacity(0.65))
+                                .frame(minWidth: 26, alignment: .leading)
+                            
+                            // Interactive Progress Scrubber Bar
+                            InteractiveScrubberBar(
+                                mediaModel: mediaModel,
+                                liveProgress: liveProgress,
+                                height: 3.5,
+                                isMini: false
+                            )
+                            
+                            Text(totalDuration > 0 ? "-\(formatTime(max(totalDuration - liveElapsed, 0.0)))" : "--:--")
+                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(Color.white.opacity(0.65))
+                                .frame(minWidth: 32, alignment: .trailing)
+                        }
+                        .padding(.horizontal, 4)
                     }
-                    .padding(.horizontal, 4)
                     
                     // BOTTOM ROW: Centered Playback Controls + Audio Output Destination Icon
                     ZStack {
@@ -372,14 +385,6 @@ public struct ExpandedDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
     
-    private var formattedRemainingOrDuration: String {
-        if mediaModel.trackInfo.duration > 0 {
-            let remaining = max(mediaModel.trackInfo.duration - mediaModel.trackInfo.elapsedTime, 0.0)
-            return "-\(formatTime(remaining))"
-        }
-        return "--:--"
-    }
-    
     private func formatTime(_ seconds: Double) -> String {
         guard seconds > 0 else { return "0:00" }
         let totalSecs = Int(seconds)
@@ -397,6 +402,7 @@ public struct ExpandedDashboardView: View {
 // Interactive Playhead & Progress Scrubber Bar with Click & Drag Support
 public struct InteractiveScrubberBar: View {
     @Bindable var mediaModel: MediaControlsWidget
+    var liveProgress: Double? = nil
     var height: CGFloat = 3.5
     var isMini: Bool = false
     
@@ -408,7 +414,10 @@ public struct InteractiveScrubberBar: View {
         if let drag = dragProgress {
             return drag
         }
-        return min(max(mediaModel.trackInfo.progress, 0.0), 1.0)
+        if let live = liveProgress {
+            return min(max(live, 0.0), 1.0)
+        }
+        return min(max(mediaModel.currentLiveProgress, 0.0), 1.0)
     }
     
     public var body: some View {
@@ -459,7 +468,9 @@ public struct InteractiveScrubberBar: View {
                         let fraction = min(max(value.location.x / totalWidth, 0.0), 1.0)
                         dragProgress = fraction
                         if mediaModel.trackInfo.duration > 0 {
-                            mediaModel.trackInfo.elapsedTime = mediaModel.trackInfo.duration * fraction
+                            let seekSeconds = mediaModel.trackInfo.duration * fraction
+                            mediaModel.baseElapsedTime = seekSeconds
+                            mediaModel.trackInfo.elapsedTime = seekSeconds
                             mediaModel.trackInfo.snapshotTimestamp = Date()
                         }
                     }

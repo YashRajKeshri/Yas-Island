@@ -623,14 +623,24 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     private var emptyPollCount: Int = 0
     private var lastSeekDate: Date = .distantPast
     private var pendingSeekTime: Double = 0.0
-    private var baseElapsedTime: Double = 0.0
+    public var baseElapsedTime: Double = 0.0
     
     public var currentLiveElapsedTime: Double {
-        return trackInfo.elapsedTime
+        if trackInfo.isPlaying && trackInfo.playbackRate > 0, let ts = trackInfo.snapshotTimestamp {
+            let delta = Date().timeIntervalSince(ts)
+            if delta >= 0 && delta < 86400 {
+                let live = self.baseElapsedTime + (delta * trackInfo.playbackRate)
+                return trackInfo.duration > 0 ? min(live, trackInfo.duration) : live
+            }
+        }
+        return self.baseElapsedTime
     }
     
     public var currentLiveProgress: Double {
-        return trackInfo.progress
+        if trackInfo.duration > 0 {
+            return min(max(currentLiveElapsedTime / trackInfo.duration, 0.0), 1.0)
+        }
+        return 0.0
     }
     
     private init() {
