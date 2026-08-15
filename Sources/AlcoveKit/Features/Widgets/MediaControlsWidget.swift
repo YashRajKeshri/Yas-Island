@@ -623,23 +623,14 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     private var emptyPollCount: Int = 0
     private var lastSeekDate: Date = .distantPast
     private var pendingSeekTime: Double = 0.0
+    private var baseElapsedTime: Double = 0.0
     
     public var currentLiveElapsedTime: Double {
-        if trackInfo.isPlaying && trackInfo.playbackRate > 0, let ts = trackInfo.snapshotTimestamp {
-            let delta = Date().timeIntervalSince(ts)
-            if delta >= 0 && delta < 86400 {
-                let live = trackInfo.elapsedTime + (delta * trackInfo.playbackRate)
-                return trackInfo.duration > 0 ? min(live, trackInfo.duration) : live
-            }
-        }
         return trackInfo.elapsedTime
     }
     
     public var currentLiveProgress: Double {
-        if trackInfo.duration > 0 {
-            return min(max(currentLiveElapsedTime / trackInfo.duration, 0.0), 1.0)
-        }
-        return 0.0
+        return trackInfo.progress
     }
     
     private init() {
@@ -675,20 +666,25 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         syncTask = Task { @MainActor [weak self] in
             var pollCounter = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms smooth ticker
+                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms high-fidelity ticker
                 guard let self = self else { return }
                 
-                // Advance local progress and time dynamically
-                if self.trackInfo.isPlaying && self.trackInfo.playbackRate > 0 {
-                    let liveTime = self.currentLiveElapsedTime
-                    if self.trackInfo.duration > 0 {
-                        self.trackInfo.progress = min(max(liveTime / self.trackInfo.duration, 0.0), 1.0)
+                // Update live elapsed time and progress stored values every 200ms
+                if self.trackInfo.isPlaying && self.trackInfo.playbackRate > 0, let ts = self.trackInfo.snapshotTimestamp {
+                    let delta = Date().timeIntervalSince(ts)
+                    if delta >= 0 && delta < 86400 {
+                        let live = self.baseElapsedTime + (delta * self.trackInfo.playbackRate)
+                        let clamped = self.trackInfo.duration > 0 ? min(live, self.trackInfo.duration) : live
+                        self.trackInfo.elapsedTime = clamped
+                        if self.trackInfo.duration > 0 {
+                            self.trackInfo.progress = min(max(clamped / self.trackInfo.duration, 0.0), 1.0)
+                        }
                     }
                 }
                 
-                // Poll system MediaRemote every 600ms
+                // Poll system MediaRemote every 800ms
                 pollCounter += 1
-                if pollCounter >= 3 {
+                if pollCounter >= 4 {
                     pollCounter = 0
                     self.refresh()
                 }
@@ -707,14 +703,32 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
                     updated.isAutoMixEnabled = self.trackInfo.isAutoMixEnabled
                     updated.airPlayDevice = self.trackInfo.airPlayDevice
                     
+                    // Preserve duration if incoming fallback returned 0 for same track
+                    if updated.duration <= 0 && self.trackInfo.duration > 0 && updated.title == self.trackInfo.title {
+                        updated.duration = self.trackInfo.duration
+                    }
+                    
+                    self.baseElapsedTime = updated.elapsedTime
+                    
                     // Optimistic seek protection: if user scrubbed recently (within 2 seconds), preserve the target seek position
                     let timeSinceSeek = Date().timeIntervalSince(self.lastSeekDate)
                     if timeSinceSeek < 2.0 {
+                        self.baseElapsedTime = self.pendingSeekTime
                         updated.elapsedTime = self.pendingSeekTime
                         updated.snapshotTimestamp = self.lastSeekDate
                         if updated.duration > 0 {
                             let seekElapsed = self.pendingSeekTime + (timeSinceSeek * (updated.playbackRate > 0 ? updated.playbackRate : 1.0))
+                            updated.elapsedTime = seekElapsed
                             updated.progress = min(max(seekElapsed / updated.duration, 0.0), 1.0)
+                        }
+                    } else if updated.isPlaying && updated.playbackRate > 0, let ts = updated.snapshotTimestamp {
+                        let delta = Date().timeIntervalSince(ts)
+                        if delta >= 0 && delta < 86400 {
+                            let liveTime = self.baseElapsedTime + (delta * updated.playbackRate)
+                            updated.elapsedTime = updated.duration > 0 ? min(liveTime, updated.duration) : liveTime
+                            if updated.duration > 0 {
+                                updated.progress = min(max(updated.elapsedTime / updated.duration, 0.0), 1.0)
+                            }
                         }
                     }
                     
@@ -733,6 +747,13 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     public func togglePlayback() {
         SystemMediaRemote.togglePlayPause()
         trackInfo.isPlaying.toggle()
+        if trackInfo.isPlaying {
+            baseElapsedTime = trackInfo.elapsedTime
+            trackInfo.snapshotTimestamp = Date()
+            trackInfo.playbackRate = 1.0
+        } else {
+            trackInfo.playbackRate = 0.0
+        }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             self?.refresh()
@@ -761,6 +782,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         
         lastSeekDate = Date()
         pendingSeekTime = targetTime
+        baseElapsedTime = targetTime
         
         trackInfo.elapsedTime = targetTime
         trackInfo.progress = clamped
@@ -774,6 +796,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         
         lastSeekDate = Date()
         pendingSeekTime = clamped
+        baseElapsedTime = clamped
         
         trackInfo.elapsedTime = clamped
         trackInfo.snapshotTimestamp = Date()

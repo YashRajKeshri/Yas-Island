@@ -292,16 +292,16 @@ public struct ExpandedDashboardView: View {
                     
                     // MIDDLE ROW: Elapsed Time + Interactive Scrubber + Remaining/Total Time
                     HStack(spacing: 7) {
-                        Text(formatTime(mediaModel.currentLiveElapsedTime))
+                        Text(formatTime(mediaModel.trackInfo.elapsedTime))
                             .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.45))
+                            .foregroundStyle(Color.white.opacity(0.55))
                         
                         // Interactive Progress Scrubber Bar
-                        InteractiveScrubberBar(mediaModel: mediaModel, height: 3.0, isMini: false)
+                        InteractiveScrubberBar(mediaModel: mediaModel, height: 3.5, isMini: false)
                         
                         Text(formattedRemainingOrDuration)
                             .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.45))
+                            .foregroundStyle(Color.white.opacity(0.55))
                     }
                     .padding(.horizontal, 4)
                     
@@ -374,8 +374,7 @@ public struct ExpandedDashboardView: View {
     
     private var formattedRemainingOrDuration: String {
         if mediaModel.trackInfo.duration > 0 {
-            let currentElapsed = mediaModel.currentLiveElapsedTime
-            let remaining = max(mediaModel.trackInfo.duration - currentElapsed, 0.0)
+            let remaining = max(mediaModel.trackInfo.duration - mediaModel.trackInfo.elapsedTime, 0.0)
             return "-\(formatTime(remaining))"
         }
         return "--:--"
@@ -409,7 +408,7 @@ public struct InteractiveScrubberBar: View {
         if let drag = dragProgress {
             return drag
         }
-        return mediaModel.currentLiveProgress
+        return min(max(mediaModel.trackInfo.progress, 0.0), 1.0)
     }
     
     public var body: some View {
