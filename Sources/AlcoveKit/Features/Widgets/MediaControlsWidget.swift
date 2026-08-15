@@ -140,11 +140,29 @@ public enum SystemMediaRemote {
             _ = send(71, opts)
         }
         
-        // 3. AppleScript fallbacks for Spotify and Apple Music
+        // 3. Spotify
         if isAppRunning("com.spotify.client") {
             runAppleScript("tell application \"Spotify\" to set player position to \(clamped)")
-        } else if isAppRunning("com.apple.Music") {
+        }
+        
+        // 4. Apple Music
+        if isAppRunning("com.apple.Music") {
             runAppleScript("tell application \"Music\" to set player position to \(clamped)")
+        }
+        
+        // 5. QuickTime Player
+        if isAppRunning("com.apple.QuickTimePlayerX") {
+            runAppleScript("tell application \"QuickTime Player\" to try\nset current time of front document to \(clamped)\nend try")
+        }
+        
+        // 6. Podcasts
+        if isAppRunning("com.apple.podcasts") {
+            runAppleScript("tell application \"Podcasts\" to try\nset playback position to \(clamped)\nend try")
+        }
+        
+        // 7. Safari
+        if isAppRunning("com.apple.Safari") {
+            runAppleScript("tell application \"Safari\" to try\ntell front document to do JavaScript \"if(document.querySelector('video')){ document.querySelector('video').currentTime = \(clamped); }\"\nend try")
         }
     }
     
@@ -603,6 +621,8 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     
     private var syncTask: Task<Void, Never>?
     private var emptyPollCount: Int = 0
+    private var lastSeekDate: Date = .distantPast
+    private var pendingSeekTime: Double = 0.0
     
     public var currentLiveElapsedTime: Double {
         if trackInfo.isPlaying && trackInfo.playbackRate > 0, let ts = trackInfo.snapshotTimestamp {
@@ -686,6 +706,18 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
                     updated.podcastSpeed = self.trackInfo.podcastSpeed
                     updated.isAutoMixEnabled = self.trackInfo.isAutoMixEnabled
                     updated.airPlayDevice = self.trackInfo.airPlayDevice
+                    
+                    // Optimistic seek protection: if user scrubbed recently (within 2 seconds), preserve the target seek position
+                    let timeSinceSeek = Date().timeIntervalSince(self.lastSeekDate)
+                    if timeSinceSeek < 2.0 {
+                        updated.elapsedTime = self.pendingSeekTime
+                        updated.snapshotTimestamp = self.lastSeekDate
+                        if updated.duration > 0 {
+                            let seekElapsed = self.pendingSeekTime + (timeSinceSeek * (updated.playbackRate > 0 ? updated.playbackRate : 1.0))
+                            updated.progress = min(max(seekElapsed / updated.duration, 0.0), 1.0)
+                        }
+                    }
+                    
                     self.trackInfo = updated
                 } else {
                     self.emptyPollCount += 1
@@ -726,28 +758,30 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     public func seek(toFraction fraction: Double) {
         let clamped = min(max(fraction, 0.0), 1.0)
         let targetTime = trackInfo.duration > 0 ? (trackInfo.duration * clamped) : (clamped * 100.0)
+        
+        lastSeekDate = Date()
+        pendingSeekTime = targetTime
+        
         trackInfo.elapsedTime = targetTime
         trackInfo.progress = clamped
         trackInfo.snapshotTimestamp = Date()
+        
         SystemMediaRemote.seek(to: targetTime)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            self?.refresh()
-        }
     }
     
     public func seek(toSeconds seconds: Double) {
         let clamped = trackInfo.duration > 0 ? min(max(seconds, 0.0), trackInfo.duration) : max(seconds, 0.0)
+        
+        lastSeekDate = Date()
+        pendingSeekTime = clamped
+        
         trackInfo.elapsedTime = clamped
         trackInfo.snapshotTimestamp = Date()
         if trackInfo.duration > 0 {
             trackInfo.progress = min(max(clamped / trackInfo.duration, 0.0), 1.0)
         }
+        
         SystemMediaRemote.seek(to: clamped)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            self?.refresh()
-        }
     }
     
     public func setPodcastSpeed(_ speed: Double) {
