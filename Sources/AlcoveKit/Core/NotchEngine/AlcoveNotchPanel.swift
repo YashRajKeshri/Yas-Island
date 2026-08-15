@@ -16,7 +16,7 @@ public final class AlcoveNotchPanel: NSPanel {
         )
         
         self.isFloatingPanel = true
-        self.level = .statusBar
+        self.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.popUpMenuWindow)))
         self.collectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary,
@@ -35,10 +35,11 @@ public final class AlcoveNotchPanel: NSPanel {
         self.hidesOnDeactivate = false
         self.becomesKeyOnlyIfNeeded = true
         self.acceptsMouseMovedEvents = true
+        self.ignoresMouseEvents = false
     }
     
     public override var canBecomeKey: Bool {
-        return NotchPanelManager.shared.state == .expanded
+        return true
     }
     
     public override var canBecomeMain: Bool {
