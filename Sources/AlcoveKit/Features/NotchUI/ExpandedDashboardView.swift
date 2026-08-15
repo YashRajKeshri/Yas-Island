@@ -378,7 +378,7 @@ public struct ExpandedDashboardView: View {
             let remaining = max(mediaModel.trackInfo.duration - currentElapsed, 0.0)
             return "-\(formatTime(remaining))"
         }
-        return "0:00"
+        return "--:--"
     }
     
     private func formatTime(_ seconds: Double) -> String {
@@ -415,7 +415,7 @@ public struct InteractiveScrubberBar: View {
     public var body: some View {
         GeometryReader { geo in
             let totalWidth = max(geo.size.width, 1.0)
-            let activeWidth = min(max(totalWidth * currentProgress, 3.0), totalWidth)
+            let activeWidth = min(max(totalWidth * currentProgress, 0.0), totalWidth)
             let isEngaged = isHovering || isDragging
             let barHeight = isEngaged ? (height + 2.5) : height
             
@@ -430,15 +430,17 @@ public struct InteractiveScrubberBar: View {
                     .frame(height: barHeight)
                 
                 // Active Filled Progress Track
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.white, Color.white.opacity(0.95)],
-                            startPoint: .leading,
-                            endPoint: .trailing
+                if activeWidth > 1.0 {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white, Color.white.opacity(0.95)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
-                    )
-                    .frame(width: activeWidth, height: barHeight)
+                        .frame(width: activeWidth, height: barHeight)
+                }
                 
                 // Playhead Scrubber Knob
                 if isEngaged && !isMini {

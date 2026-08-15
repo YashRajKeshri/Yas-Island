@@ -311,7 +311,7 @@ public enum SystemMediaRemote {
                     }
                     
                     let cleaned = cleanTrackInfo(rawTitle: rawTitle, rawArtist: rawArtist, rawAlbum: rawAlbum)
-                    let progress = duration > 0 ? min(max(liveElapsed / duration, 0.0), 1.0) : (isPlaying ? 0.5 : 0.0)
+                    let progress = duration > 0 ? min(max(liveElapsed / duration, 0.0), 1.0) : 0.0
                     
                     let track = MediaTrackInfo(
                         title: cleaned.title,
@@ -556,7 +556,7 @@ public enum SystemMediaRemote {
                         album: "Web Media",
                         isPlaying: true,
                         appName: browser.name,
-                        progress: 0.5,
+                        progress: 0.0,
                         duration: 0.0,
                         elapsedTime: 0.0,
                         artworkData: artData,
@@ -619,7 +619,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         if trackInfo.duration > 0 {
             return min(max(currentLiveElapsedTime / trackInfo.duration, 0.0), 1.0)
         }
-        return trackInfo.progress
+        return 0.0
     }
     
     private init() {
@@ -728,6 +728,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
         let targetTime = trackInfo.duration > 0 ? (trackInfo.duration * clamped) : (clamped * 100.0)
         trackInfo.elapsedTime = targetTime
         trackInfo.progress = clamped
+        trackInfo.snapshotTimestamp = Date()
         SystemMediaRemote.seek(to: targetTime)
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -738,6 +739,7 @@ public final class MediaControlsWidget: AlcoveWidget, @unchecked Sendable {
     public func seek(toSeconds seconds: Double) {
         let clamped = trackInfo.duration > 0 ? min(max(seconds, 0.0), trackInfo.duration) : max(seconds, 0.0)
         trackInfo.elapsedTime = clamped
+        trackInfo.snapshotTimestamp = Date()
         if trackInfo.duration > 0 {
             trackInfo.progress = min(max(clamped / trackInfo.duration, 0.0), 1.0)
         }
